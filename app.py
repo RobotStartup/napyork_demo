@@ -1,5 +1,5 @@
 """
-MewsFlow AI — Streamlit MVP Dashboard
+MewsFlow AI — Streamlit MVP Dashboard with visible routing
 """
 
 import streamlit as st
@@ -30,11 +30,11 @@ st.markdown("""
     .cost-bar { height: 32px; border-radius: 8px; display: flex; align-items: center; padding-left: 12px; font-weight: 600; font-size: 14px; }
     .cost-human { background: rgba(239,68,68,0.15); color: #ef4444; width: 100%; }
     .cost-ai { background: rgba(34,197,94,0.15); color: #22c55e; width: 8%; min-width: 140px; }
+    .routing-box { background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.3); border-radius: 8px; padding: 12px; margin: 8px 0; font-size: 13px; }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── Initialize Orchestrator ──
 @st.cache_resource(show_spinner="Initializing MewsFlow AI agents...")
 def get_orchestrator():
     from agents.orchestrator import AgentOrchestrator
@@ -70,6 +70,7 @@ if "messages" not in st.session_state:
             ),
             "agents": [],
             "elapsed": None,
+            "routing": None,
         }
     ]
 
@@ -87,6 +88,20 @@ if "agent_stats" not in st.session_state:
 if "total_tokens_estimate" not in st.session_state:
     st.session_state.total_tokens_estimate = 0
 
+
+# Agent name mapping
+AGENT_DISPLAY = {
+    "reservation": "Reservation",
+    "support": "Support",
+    "ota_sync": "OTA Sync",
+    "reporting": "Reporting",
+}
+AGENT_ICONS = {
+    "reservation": "💳",
+    "support": "💬",
+    "ota_sync": "🔄",
+    "reporting": "📊",
+}
 
 # ── Sidebar ──
 agents_config = [
@@ -146,9 +161,23 @@ with tab_chat:
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"], avatar="🏨" if msg["role"] == "assistant" else "👤"):
             st.markdown(msg["content"])
-            if msg.get("agents"):
-                st.caption(f"Agents: {' '.join(f'`{a}`' for a in msg['agents'])}")
-            if msg.get("elapsed"):
+
+            # Show routing info if available
+            if msg.get("routing"):
+                r = msg["routing"]
+                agent_key = r["agent"]
+                icon = AGENT_ICONS.get(agent_key, "🤖")
+                display = AGENT_DISPLAY.get(agent_key, agent_key)
+                keywords = ", ".join(r["matched_keywords"][:5])
+                st.markdown(
+                    f'<div class="routing-box">'
+                    f'🧠 <b>Orchestrator →</b> {icon} <b>{display} Agent</b><br>'
+                    f'<small>Reason: {r["reason"]}<br>'
+                    f'Matched: {keywords}</small></div>',
+                    unsafe_allow_html=True,
+                )
+
+            if msg.get("agents") and msg.get("elapsed"):
                 st.caption(f"⏱️ {msg['elapsed']:.1f}s")
 
     if len(st.session_state.messages) <= 2:
@@ -174,28 +203,32 @@ with tab_chat:
         del st.session_state.quick_action
 
     if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
+        st.session_state.messages.append({"role": "user", "content": user_input, "routing": None})
         with st.chat_message("user", avatar="👤"):
             st.markdown(user_input)
 
         with st.chat_message("assistant", avatar="🏨"):
-            status = st.status("Processing your request...", expanded=True)
+            status = st.status("🧠 Orchestrator analyzing request...", expanded=True)
 
-            lower = user_input.lower()
-            if any(w in lower for w in ["policy", "faq", "refund", "check-in", "what is", "how do", "cancel policy"]):
-                likely_agent = "Support"
-            elif any(w in lower for w in ["report", "arrival", "departure", "revenue", "occupancy", "summary", "analytics", "performance"]):
-                likely_agent = "Reporting"
-            elif any(w in lower for w in ["sync", "ota", "expedia", "booking.com", "hostelworld", "availability"]):
-                likely_agent = "OTA Sync"
-            else:
-                likely_agent = "Reservation"
-
-            status.update(label=f"Routing to {likely_agent} Agent...", state="running")
             start_time = time.time()
 
             try:
                 orchestrator = get_orchestrator()
+
+                # Step 1: Show routing decision
+                routing = orchestrator.route(user_input)
+                agent_key = routing["agent"]
+                icon = AGENT_ICONS.get(agent_key, "🤖")
+                display = AGENT_DISPLAY.get(agent_key, agent_key)
+                keywords = ", ".join(routing["matched_keywords"][:5])
+
+                status.write(f"**📨 Message received:** {user_input[:80]}...")
+                status.write(f"**🔍 Keywords detected:** {keywords}")
+                status.write(f"**🎯 Routing decision:** {icon} **{display} Agent**")
+                status.write(f"**💡 Reason:** {routing['reason']}")
+                status.update(label=f"⚡ {display} Agent processing...", state="running")
+
+                # Step 2: Call the agent
                 result = run_async(
                     orchestrator.process_message(
                         message=user_input,
@@ -206,49 +239,70 @@ with tab_chat:
 
                 elapsed = time.time() - start_time
                 response_text = result.get("response", "No response generated.")
-                agents_used = result.get("agents_used", [likely_agent.lower() + "_agent"])
+                agents_used = result.get("agents_used", [agent_key + "_agent"])
+                routing_info = result.get("routing", routing)
+
                 token_estimate = (len(user_input) + len(response_text)) // 4
                 st.session_state.total_tokens_estimate += token_estimate
-                status.update(label="✅ Complete", state="complete")
+
+                status.write(f"**✅ Response generated** in {elapsed:.1f}s")
+                status.update(label=f"✅ {display} Agent — Complete ({elapsed:.1f}s)", state="complete")
 
             except Exception as e:
-                # ══════════════════════════════════════════════════
-                # DEBUGGING: Print full traceback to terminal
-                # Check your PowerShell window for the exact error
-                # ══════════════════════════════════════════════════
-                print("\n" + "=" * 60)
-                print("MEWSFLOW ERROR — Full traceback:")
-                print("=" * 60)
                 traceback.print_exc()
-                print("=" * 60 + "\n")
-
                 elapsed = time.time() - start_time
                 response_text = f"I encountered an error processing your request: `{str(e)}`\n\nPlease try again or rephrase your question."
-                agents_used = [likely_agent.lower() + "_agent"]
+                agents_used = ["error"]
+                routing_info = None
                 status.update(label="❌ Error", state="error")
                 st.error(f"Error: {e}")
 
+            # Display response
             st.markdown(response_text)
-            if agents_used:
-                st.caption(f"Agents: {' '.join(f'`{a}`' for a in agents_used)} · ⏱️ {elapsed:.1f}s")
 
+            # Show routing box
+            if routing_info:
+                r = routing_info
+                agent_key = r["agent"]
+                icon = AGENT_ICONS.get(agent_key, "🤖")
+                display = AGENT_DISPLAY.get(agent_key, agent_key)
+                keywords = ", ".join(r["matched_keywords"][:5])
+                st.markdown(
+                    f'<div class="routing-box">'
+                    f'🧠 <b>Orchestrator →</b> {icon} <b>{display} Agent</b><br>'
+                    f'<small>Reason: {r["reason"]}<br>'
+                    f'Matched: {keywords}</small></div>',
+                    unsafe_allow_html=True,
+                )
+
+            if elapsed:
+                st.caption(f"⏱️ {elapsed:.1f}s")
+
+            # Update session state
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": response_text,
                 "agents": agents_used,
                 "elapsed": elapsed,
+                "routing": routing_info,
             })
 
-            stats = st.session_state.agent_stats[likely_agent]
+            # Update agent stats
+            if routing_info:
+                agent_display_name = AGENT_DISPLAY.get(routing_info["agent"], "Reservation")
+            else:
+                agent_display_name = "Reservation"
+            stats = st.session_state.agent_stats[agent_display_name]
             stats["runs"] += 1
             stats["total_time"] += elapsed
 
             st.session_state.action_logs.insert(0, {
                 "time": datetime.now().strftime("%H:%M:%S"),
-                "agent": likely_agent,
+                "agent": agent_display_name,
                 "action": user_input[:80] + ("..." if len(user_input) > 80 else ""),
-                "status": "error" if "error" in response_text.lower() else "success",
+                "status": "error" if "error" in response_text.lower()[:50] else "success",
                 "elapsed": f"{elapsed:.1f}s",
+                "routing": routing_info,
             })
 
         st.rerun()
@@ -257,7 +311,7 @@ with tab_chat:
 # ── Logs Tab ──
 with tab_logs:
     st.markdown("### Action Logs")
-    st.caption("Every agent action is logged for full auditability.")
+    st.caption("Every agent action is logged with routing decisions for full auditability.")
     if not st.session_state.action_logs:
         st.info("No actions yet. Start a conversation in the Chat tab to see logs here.")
     else:
@@ -275,6 +329,13 @@ with tab_logs:
                 st.markdown(f"{status_emoji} {log['action']}")
             with col4:
                 st.caption(log["elapsed"])
+            # Show routing details in expander
+            if log.get("routing"):
+                with st.expander("🧠 Routing details"):
+                    r = log["routing"]
+                    st.write(f"**Agent:** {r['agent']}")
+                    st.write(f"**Reason:** {r['reason']}")
+                    st.write(f"**Matched keywords:** {', '.join(r['matched_keywords'])}")
 
 
 # ── Analytics Tab ──
@@ -331,17 +392,15 @@ with tab_analytics:
             ↓
     Streamlit App (this MVP)
             ↓
-    LangChain Supervisor Agent (orchestrator.py)
+    Orchestrator (keyword router → selects agent)
             ↓ routes to
     ┌───────────────┬─────────────┬──────────────┬────────────────┐
     │  Reservation   │   Support   │   OTA Sync   │   Reporting    │
     │  Agent         │   Agent     │   Agent      │   Agent        │
-    │  (6 tools)     │  (2 tools   │  (5 tools)   │  (5 tools)     │
-    │                │   + RAG)    │              │                │
-    └───────┬───────┴──────┬──────┴──────┬───────┴───────┬────────┘
-            ↓              ↓             ↓               ↓
-        Mews API     Vector DB     Spring Boot      Mews API
-                     (Chroma)      OTA Service
+    │  (payments,    │  (FAQ +     │  (Expedia,   │  (arrivals,    │
+    │   cards,       │   RAG       │   Booking,   │   revenue,     │
+    │   cancels)     │   search)   │   Hostelworld│   summaries)   │
+    └───────────────┴─────────────┴──────────────┴────────────────┘
     """, language=None)
     st.caption(
         "Production architecture adds: Node.js gateway (auth + WebSocket), "
