@@ -1,10 +1,4 @@
-streamlit>=1.38.0
-langchain==0.3.25
-langchain-core>=0.3.58
-langchain-community==0.3.20
+streamlit
 langchain-openai==0.3.12
-langchain-text-splitters>=0.3.8
-openai>=1.68.0
-pydantic>=2.9.0
-httpx>=0.27.0
-python-dotenv>=1.0.0
+langchain-core>=0.3.58
+python-dotenv
