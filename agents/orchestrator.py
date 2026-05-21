@@ -26,17 +26,11 @@ logger = logging.getLogger("mewsflow.orchestrator")
 
 # Routing rules — keywords mapped to agents
 ROUTING_RULES = {
-    "support": {
-        "keywords": ["policy", "faq", "refund", "check-in", "what is", "how do",
-                      "cancel policy", "amenities", "services", "book", "pricing",
-                      "cancellation", "checkout", "check out", "wifi", "shower",
-                      "hours", "location", "where"],
-        "description": "Guest support, policies, FAQ, knowledge base search",
-    },
     "reporting": {
         "keywords": ["report", "arrival", "departure", "revenue", "occupancy",
                       "summary", "analytics", "performance", "how many", "stats",
-                      "today", "weekly", "monthly", "dashboard"],
+                      "today", "weekly", "monthly", "dashboard", "booking source",
+                      "generate", "numbers"],
         "description": "Reports, analytics, arrivals, revenue, occupancy stats",
     },
     "ota_sync": {
@@ -44,12 +38,18 @@ ROUTING_RULES = {
                       "availability", "overbooking", "channel"],
         "description": "OTA sync across Expedia, Booking.com, Hostelworld",
     },
+    "support": {
+        "keywords": ["policy", "faq", "refund", "check-in", "what is", "how do",
+                      "cancel policy", "amenities", "services", "pricing",
+                      "cancellation", "checkout", "check out", "wifi", "shower",
+                      "hours", "location", "where"],
+        "description": "Guest support, policies, FAQ, knowledge base search",
+    },
     "reservation": {
-        "keywords": [],  # Default fallback
+        "keywords": [],
         "description": "Reservation management, payments, card charging, cancellations",
     },
 }
-
 
 class AgentOrchestrator:
     def __init__(self):
@@ -83,7 +83,7 @@ class AgentOrchestrator:
             }
 
         lower = message.lower()
-        for agent_name in ["support", "reporting", "ota_sync"]:
+        for agent_name in ["reporting", "ota_sync", "support"]:
             rules = ROUTING_RULES[agent_name]
             matched = [kw for kw in rules["keywords"] if kw in lower]
             if matched:
